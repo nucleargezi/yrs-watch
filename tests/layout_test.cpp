@@ -58,7 +58,9 @@ void test_font_helper(const fs::path& helper) {
 
     // 2. Invalid UTF-8 is sanitized; long Latin and CJK model names are elided in the middle.
     const std::string invalid_utf8 = std::string("\xff\xfe\xf0", 3) + "\n";
-    const std::string long_ascii = "Very-Long-Experimental-Model-Name-Alpha-2026\n";
+    // Long enough to exceed the elision limit in any common UI font, not only Adwaita Sans.
+    const std::string long_ascii =
+        "Very-Long-Experimental-Model-Name-Alpha-2026-Preview-Extended-Context-Edition-Build-Twelve\n";
     const std::string long_cjk = "超长测试模型名称用于验证多字节字符中间省略逻辑AlphaBeta2026\n";
     auto mixed = run_helper(helper, "Adwaita Sans 11", invalid_utf8 + long_ascii + long_cjk);
     CHECK(mixed.size() == 3);
