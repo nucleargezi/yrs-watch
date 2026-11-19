@@ -127,6 +127,7 @@ public:
         render();
         arm();
         watch_sleep();
+        watch_snapshots();
     }
 
     ~Watch() {
@@ -134,6 +135,13 @@ public:
         clear_timer(system_timer_);
         if (sleep_signal_) g_dbus_connection_signal_unsubscribe(system_bus_, sleep_signal_);
         g_clear_object(&system_bus_);
+        for (auto& watcher : snapshot_watchers_) {
+            clear_timer(watcher.debounce);
+            if (!watcher.monitor) continue;
+            g_signal_handlers_disconnect_by_data(watcher.monitor, this);
+            g_file_monitor_cancel(watcher.monitor);
+            g_clear_object(&watcher.monitor);
+        }
         for (auto& source : sources_) source.worker.request_stop();
         for (auto& source : sources_) if (source.worker.joinable()) source.worker.join();
     }
@@ -146,6 +154,8 @@ private:
     std::unique_ptr<Tray> tray_;
     guint schedule_timer_ = 0, system_timer_ = 0, sleep_signal_ = 0;
     GDBusConnection* system_bus_ = nullptr;
+    struct SnapshotWatcher { GFileMonitor* monitor = nullptr; guint debounce = 0; };
+    std::array<SnapshotWatcher, provider_count> snapshot_watchers_;
     bool visible_ = false, autostart_ = false;
     std::optional<Memory> memory_;
     std::optional<CpuTicks> previous_cpu_;
@@ -233,7 +243,7 @@ private:
         } else {
             switch (result.error) {
                 case QuotaError::NeedsLogin: source.state.error = "需要登录"; break;
-                case QuotaError::Missing: source.state.error = "未找到客户端"; break;
+                case QuotaError::Missing: source.state.error = is_cli(i) ? "未找到客户端" : "尚无快照"; break;
                 case QuotaError::Timeout: source.state.error = "等待连接 · 查询超时"; break;
                 case QuotaError::Offline: source.state.error = "等待连接"; break;
                 default: source.state.error = result.message.empty() ? "等待连接" : result.message; break;
@@ -289,6 +299,43 @@ private:
                     if (auto watch = static_cast<WeakWatch*>(user)->lock()) watch->resumed();
                 }, new WeakWatch(self), [](gpointer user) { delete static_cast<WeakWatch*>(user); });
         }, new WeakWatch(weak_from_this()));
+    }
+
+    // Snapshot files change whenever their writer runs; read them shortly after.
+    void watch_snapshots() {
+        for (size_t i = 0; i < provider_count; ++i) {
+            if (is_cli(i)) continue;
+            const auto path = snapshot_file(provider_table[i].id);
+            if (path.empty()) continue;
+            g_mkdir_with_parents(path.parent_path().c_str(), 0700);
+            // The local VFS avoids loading the gvfs client and activating its daemon.
+            g_autoptr(GFile) file = g_vfs_get_file_for_path(g_vfs_get_local(), path.c_str());
+            // Without WATCH_MOVES, the writer's atomic rename arrives as CREATED for this name.
+            auto* monitor = g_file_monitor_file(file, G_FILE_MONITOR_NONE, nullptr, nullptr);
+            if (!monitor) continue;
+            snapshot_watchers_[i].monitor = monitor;
+            g_signal_connect(monitor, "changed", G_CALLBACK(+[](GFileMonitor* changed, GFile*, GFile*,
+                                                                GFileMonitorEvent, gpointer data) {
+                auto& watch = *static_cast<Watch*>(data);
+                for (size_t k = 0; k < provider_count; ++k)
+                    if (watch.snapshot_watchers_[k].monitor == changed) watch.snapshot_changed(k);
+            }), this);
+        }
+    }
+
+    void snapshot_changed(size_t i) {
+        struct Pending { Watch* watch; size_t index; };
+        auto& debounce = snapshot_watchers_[i].debounce;
+        clear_timer(debounce);
+        debounce = g_timeout_add_full(G_PRIORITY_DEFAULT, 1000, [](gpointer data) -> gboolean {
+            const auto& pending = *static_cast<Pending*>(data);
+            auto& watch = *pending.watch;
+            watch.snapshot_watchers_[pending.index].debounce = 0;
+            watch.launch(pending.index);
+            watch.render();
+            watch.arm();
+            return G_SOURCE_REMOVE;
+        }, new Pending{this, i}, [](gpointer data) { delete static_cast<Pending*>(data); });
     }
 
     void resumed() {

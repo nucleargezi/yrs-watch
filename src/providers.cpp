@@ -2,6 +2,7 @@
 
 #include "child_process.hpp"
 #include "provider_impl.hpp"
+#include "snapshot.hpp"
 
 namespace yrswatch {
 
@@ -12,6 +13,7 @@ QuotaResult fetch_quota(Provider provider, std::stop_token stop) {
         switch (provider) {
             case Provider::Codex: sample = detail::fetch_codex(stop); break;
             case Provider::Antigravity: sample = detail::fetch_antigravity(stop); break;
+            case Provider::Claude: sample = detail::fetch_claude(stop); break;
         }
         if (sample.rows.empty()) detail::fail(QuotaError::Unavailable, "客户端未返回额度窗口");
         sample.provider = provider;
@@ -20,6 +22,15 @@ QuotaResult fetch_quota(Provider provider, std::stop_token stop) {
     } catch (const detail::Failure& f) {
         return {{}, f.code, f.message};
     }
+}
+
+std::filesystem::path snapshot_file(Provider provider) {
+    switch (provider) {
+        case Provider::Claude: return claude_snapshot_path();
+        case Provider::Codex:
+        case Provider::Antigravity: break;
+    }
+    return {};
 }
 
 } // namespace yrswatch

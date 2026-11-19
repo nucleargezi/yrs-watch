@@ -8,6 +8,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace yrswatch {
@@ -62,6 +63,8 @@ std::vector<Alert> apply_sample(ProviderState& state, QuotaSample sample,
 // The parent directory is created with mode 0700. Each replacement is atomic, fsynced and 0600.
 bool save_cache(const std::filesystem::path& path, const std::vector<QuotaSample>& samples);
 std::vector<QuotaSample> load_cache(const std::filesystem::path& path);
+// Atomically replaces path with contents: parent created 0700, file fsynced and 0600.
+bool write_private_file(const std::filesystem::path& path, std::string_view contents);
 // Reads a regular file owned by the current user and inaccessible to others, without following symlinks.
 std::optional<std::string> read_private_file(const std::filesystem::path& path, std::size_t max_size);
 

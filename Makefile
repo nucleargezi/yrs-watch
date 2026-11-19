@@ -9,14 +9,14 @@ CXXFLAGS ?= -O2
 WARNINGS := -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wno-sign-conversion
 CXXFLAGS += -std=c++20 $(WARNINGS) -pthread
 LDLIBS += $(WATCH_LIBS) -pthread
-provider_sources := providers child_process json_util provider_codex provider_antigravity
+provider_sources := providers child_process json_util provider_codex provider_antigravity provider_claude
 sources := main core desktop tray quota_layout $(provider_sources)
 provider_objects := $(addprefix build/,$(addsuffix .o,$(provider_sources)))
 asan_provider_objects := $(addprefix build/asan/,$(addsuffix .o,$(provider_sources)))
 objects := $(addprefix build/,$(addsuffix .o,$(sources)))
 
-.PHONY: all test test-asan install uninstall clean local-deps
-all: build/yrs-watch build/yrs-watch-font-metrics
+.PHONY: all test test-asan install uninstall clean local-deps claude-statusline claude-statusline-remove
+all: build/yrs-watch build/yrs-watch-font-metrics build/yrs-watch-statusline
 
 local-deps: | build
 	sh tools/local-deps.sh
@@ -29,6 +29,9 @@ build/%.o: src/%.cpp | build
 
 build/yrs-watch: $(objects)
 	$(CXX) $(LDFLAGS) $(filter-out %.hpp,$^) $(LDLIBS) -o $@
+
+build/yrs-watch-statusline: build/statusline.o build/core.o
+	$(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
 
 build/yrs-watch-font-metrics: src/font_metrics.cpp | build
 	$(CXX) $(FONT_CPPFLAGS) $(CXXFLAGS) $(LDFLAGS) $< $(FONT_LIBS) -o $@
@@ -50,6 +53,7 @@ test: all build/core_test build/schedule_test build/provider_test build/layout_t
 	./build/schedule_test
 	./build/provider_test
 	./build/layout_test
+	python3 tests/statusline_test.py ./build/yrs-watch-statusline
 	python3 tests/integration.py ./build/yrs-watch
 
 ASAN_FLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer -g -O1
@@ -82,8 +86,14 @@ test-asan: build/asan/yrs-watch-font-metrics build/asan/core_test build/asan/sch
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 ./build/asan/provider_test
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 ./build/asan/layout_test
 
-install: build/yrs-watch build/yrs-watch-font-metrics
+install: build/yrs-watch build/yrs-watch-font-metrics build/yrs-watch-statusline
 	python3 tools/install.py install $<
+
+claude-statusline:
+	python3 tools/install.py claude-hook
+
+claude-statusline-remove:
+	python3 tools/install.py claude-unhook
 
 uninstall:
 	python3 tools/install.py uninstall
@@ -91,4 +101,4 @@ uninstall:
 clean:
 	$(RM) -r build
 
--include $(objects:.o=.d) $(wildcard build/asan/*.d)
+-include $(objects:.o=.d) build/statusline.d $(wildcard build/asan/*.d)

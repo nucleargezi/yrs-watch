@@ -223,10 +223,16 @@ bool save_cache(const std::filesystem::path& path, const std::vector<QuotaSample
     gsize length = 0;
     g_autofree gchar* data = g_key_file_to_data(file, &length, nullptr);
     if (!data || length > max_cache_size) return false;
+    return write_private_file(path, std::string_view(data, length));
+}
+
+bool write_private_file(const std::filesystem::path& path, std::string_view contents) {
+    const char* data = contents.data();
+    const std::size_t length = contents.size();
     const auto parent = path.parent_path();
     if (!parent.empty() && g_mkdir_with_parents(parent.c_str(), 0700) != 0) return false;
     // Not g_file_set_contents_full(): recent GLib keeps the mode of the file it
-    // replaces, and the cache must always end up 0600.
+    // replaces, and these files must always end up 0600.
     auto temp = path.string() + ".XXXXXX";
     const int fd = g_mkstemp_full(temp.data(), O_RDWR | O_CLOEXEC, 0600);
     if (fd < 0) return false;

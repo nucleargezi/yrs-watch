@@ -9,7 +9,7 @@ namespace yrswatch {
 // Adding a source: append an enumerator and a matching provider_table entry,
 // then implement its fetch function (see providers.cpp). The compiler flags
 // every switch that still needs a case.
-enum class Provider { Codex, Antigravity };
+enum class Provider { Codex, Antigravity, Claude };
 
 enum class SourceKind {
     Cli,      // Spawns an official client. Heavy, so at most one runs at a time.
@@ -27,6 +27,8 @@ struct ProviderInfo {
 inline constexpr std::array provider_table{
     ProviderInfo{Provider::Codex, "codex", "Codex", SourceKind::Cli, false},
     ProviderInfo{Provider::Antigravity, "antigravity", "Antigravity", SourceKind::Cli, false},
+    // Only Claude.ai subscription logins expose usage windows, so stay hidden until one arrives.
+    ProviderInfo{Provider::Claude, "claude", "Claude", SourceKind::Snapshot, true},
 };
 inline constexpr std::size_t provider_count = provider_table.size();
 

@@ -36,6 +36,7 @@ int main() {
     std::filesystem::path empty_home = dir / "empty-home";
     std::filesystem::create_directory(empty_home);
     setenv("HOME", empty_home.c_str(), 1);
+    setenv("XDG_CACHE_HOME", (dir / "cache").c_str(), 1);
     setenv("PATH", pattern, 1);
     setenv("PIDS", (dir / "pids").c_str(), 1);
     setenv("VERSION_PROBES", (dir / "version-probes").c_str(), 1);
@@ -179,6 +180,31 @@ wait
     // SIGKILL delivery to an orphan may finish just after waitpid on the leader.
     std::this_thread::sleep_for(30ms);
     stopped(grandchild);
+
+    // Claude reads the statusline snapshot, which must be private and well formed.
+    const auto snapshot = dir / "cache" / "yrs-watch" / "claude-statusline.json";
+    CHECK(fetch_quota(Provider::Claude).error == QuotaError::Missing);
+    std::filesystem::create_directories(snapshot.parent_path());
+    std::ofstream(snapshot) << R"({"version":1,"observed_at":1900000000,"windows":{)"
+        R"("seven_day":{"used_percentage":2.0,"resets_at":1900500000},)"
+        R"("five_hour":{"used_percentage":26,"resets_at":1900010000},)"
+        R"("seven_day_opus":{"used_percentage":50},"ignored":{}}})";
+    CHECK(chmod(snapshot.c_str(), 0644) == 0);
+    CHECK(fetch_quota(Provider::Claude).error == QuotaError::Unavailable);
+    CHECK(chmod(snapshot.c_str(), 0600) == 0);
+    auto claude = fetch_quota(Provider::Claude);
+    CHECK(claude.sample && claude.sample->rows.size() == 3);
+    CHECK(claude.sample->provider == Provider::Claude && claude.sample->observed_at == 1900000000);
+    const auto& rows = claude.sample->rows;
+    CHECK(rows[0].id == "claude:five_hour" && rows[0].window == "5 小时" && rows[0].remaining == 0.74 &&
+          rows[0].reset_at == 1900010000);
+    CHECK(rows[1].id == "claude:seven_day" && rows[1].window == "每周" && rows[1].remaining == 0.98);
+    CHECK(rows[2].id == "claude:seven_day_opus" && rows[2].remaining == 0.5 && !rows[2].reset_at);
+    std::ofstream(snapshot) << R"({"version":2,"observed_at":1900000000,"windows":{}})";
+    CHECK(fetch_quota(Provider::Claude).error == QuotaError::Unavailable);
+    std::ofstream(snapshot) << std::string(70 * 1024, ' ');
+    CHECK(fetch_quota(Provider::Claude).error == QuotaError::Unavailable);
+    CHECK(snapshot_file(Provider::Claude) == snapshot && snapshot_file(Provider::Codex).empty());
 
     // A missing executable reports Missing (both PATH and HOME fallbacks are hidden).
     setenv("PATH", empty_home.c_str(), 1);

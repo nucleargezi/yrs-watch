@@ -12,5 +12,6 @@ namespace yrswatch::detail {
 
 QuotaSample fetch_codex(std::stop_token stop);
 QuotaSample fetch_antigravity(std::stop_token stop);
+QuotaSample fetch_claude(std::stop_token stop);
 
 } // namespace yrswatch::detail

@@ -276,6 +276,20 @@ def run(binary, root):
         until(lambda: all(len((root / (name + ".calls")).read_text().splitlines()) > count
                           for name, count in counts.items()) and "刷新中" not in layout(), duration=15)
 
+        # Claude stays hidden until its statusline helper writes a snapshot.
+        assert "Claude" not in layout() and "CPU" in bus(MENU + "GetProperty", 104, "label")
+        statusline = Path(binary).with_name("yrs-watch-statusline")
+        subprocess.run([str(statusline)], input=json.dumps({"model": {"display_name": "Opus"}, "rate_limits": {
+            "five_hour": {"used_percentage": 30, "resets_at": 1980000000}}}), text=True, check=True, capture_output=True)
+        until(lambda: has("Claude", "70%"))
+        # The system block moves behind Claude; clicking Claude never starts a client.
+        assert "Claude" in bus(MENU + "GetProperty", 104, "label")
+        assert "CPU" in bus(MENU + "GetProperty", 106, "label")
+        calls = {name: (root / (name + ".calls")).read_text() for name in ("codex", "agy")}
+        event(104)
+        time.sleep(.3)
+        assert all((root / (name + ".calls")).read_text() == text for name, text in calls.items())
+
         event(2)
         auto = root / "config" / "autostart" / (APP + ".desktop")
         auto_text = auto.read_text()
