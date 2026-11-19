@@ -9,7 +9,10 @@ CXXFLAGS ?= -O2
 WARNINGS := -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wno-sign-conversion
 CXXFLAGS += -std=c++20 $(WARNINGS) -pthread
 LDLIBS += $(WATCH_LIBS) -pthread
-sources := main core desktop providers tray quota_layout
+provider_sources := providers child_process json_util provider_codex provider_antigravity
+sources := main core desktop tray quota_layout $(provider_sources)
+provider_objects := $(addprefix build/,$(addsuffix .o,$(provider_sources)))
+asan_provider_objects := $(addprefix build/asan/,$(addsuffix .o,$(provider_sources)))
 objects := $(addprefix build/,$(addsuffix .o,$(sources)))
 
 .PHONY: all test test-asan install uninstall clean local-deps
@@ -33,7 +36,7 @@ build/yrs-watch-font-metrics: src/font_metrics.cpp | build
 build/core_test: tests/core_test.cpp tests/check.hpp build/core.o | build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(filter-out %.hpp,$^) $(LDLIBS) -o $@
 
-build/provider_test: tests/provider_test.cpp tests/check.hpp build/core.o build/providers.o | build
+build/provider_test: tests/provider_test.cpp tests/check.hpp build/core.o $(provider_objects) | build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(filter-out %.hpp,$^) $(LDLIBS) -o $@
 
 build/schedule_test: tests/schedule_test.cpp tests/check.hpp src/schedule.hpp src/core.hpp | build
@@ -67,7 +70,7 @@ build/asan/core_test: tests/core_test.cpp tests/check.hpp build/asan/core.o | bu
 build/asan/schedule_test: tests/schedule_test.cpp tests/check.hpp src/schedule.hpp src/core.hpp | build/asan
 	$(CXX) $(CPPFLAGS) $(ASAN_CXXFLAGS) $(LDFLAGS) $< $(LDLIBS) -o $@
 
-build/asan/provider_test: tests/provider_test.cpp tests/check.hpp build/asan/core.o build/asan/providers.o | build/asan
+build/asan/provider_test: tests/provider_test.cpp tests/check.hpp build/asan/core.o $(asan_provider_objects) | build/asan
 	$(CXX) $(CPPFLAGS) $(ASAN_CXXFLAGS) $(LDFLAGS) $(filter-out %.hpp,$^) $(LDLIBS) -o $@
 
 build/asan/layout_test: tests/layout_test.cpp tests/check.hpp build/asan/quota_layout.o src/quota_layout.hpp src/tray.hpp | build/asan

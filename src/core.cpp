@@ -108,8 +108,8 @@ namespace {
 constexpr int max_rows = 512;
 constexpr std::size_t max_cache_size = 512 * 1024;
 
-const char* provider_key(Provider provider) {
-    return provider == Provider::Codex ? "codex" : "antigravity";
+std::string provider_key(Provider provider) {
+    return std::string(info(provider).key);
 }
 
 std::string get_text(GKeyFile* file, const char* group, const char* key) {
@@ -129,7 +129,8 @@ std::optional<double> get_number(GKeyFile* file, const char* group, const char* 
 }
 
 void store_sample(GKeyFile* file, const QuotaSample& sample) {
-    const char* section = provider_key(sample.provider);
+    const auto key = provider_key(sample.provider);
+    const char* section = key.c_str();
     g_key_file_set_int64(file, section, "observed", sample.observed_at);
     g_key_file_set_string(file, section, "account", sample.account.c_str());
     g_key_file_set_integer(file, section, "rows", static_cast<int>(sample.rows.size()));
@@ -162,7 +163,8 @@ void store_sample(GKeyFile* file, const QuotaSample& sample) {
 }
 
 std::optional<QuotaSample> restore_sample(GKeyFile* file, Provider provider) {
-    const char* section = provider_key(provider);
+    const auto key = provider_key(provider);
+    const char* section = key.c_str();
     const auto observed = get_time(file, section, "observed");
     const int rows = g_key_file_get_integer(file, section, "rows", nullptr);
     const int alerts = g_key_file_get_integer(file, section, "alerts", nullptr);
@@ -272,8 +274,8 @@ std::vector<QuotaSample> load_cache(const std::filesystem::path& path) {
     if (!g_key_file_load_from_data(file, data->data(), data->size(), G_KEY_FILE_NONE, nullptr) ||
         g_key_file_get_integer(file, "cache", "version", nullptr) != 1) return {};
     std::vector<QuotaSample> samples;
-    for (Provider provider : {Provider::Codex, Provider::Antigravity}) {
-        if (auto sample = restore_sample(file, provider)) samples.push_back(std::move(*sample));
+    for (const auto& entry : provider_table) {
+        if (auto sample = restore_sample(file, entry.id)) samples.push_back(std::move(*sample));
     }
     return samples;
 }

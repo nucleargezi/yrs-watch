@@ -1,5 +1,7 @@
 #pragma once
 
+#include "provider_registry.hpp"
+
 #include <cstdint>
 #include <filesystem>
 #include <istream>
@@ -11,7 +13,6 @@
 namespace yrswatch {
 
 using Epoch = std::int64_t;
-enum class Provider { Codex, Antigravity };
 
 struct QuotaRow {
     std::string id, label;

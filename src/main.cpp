@@ -22,9 +22,9 @@
 namespace yrswatch {
 namespace {
 constexpr char app_id[] = "io.github.yorisou.YrsWatch";
-constexpr std::array providers{Provider::Codex, Provider::Antigravity};
 std::int64_t monotonic_seconds() { return g_get_monotonic_time() / G_USEC_PER_SEC; }
-const char* name(Provider provider) { return provider == Provider::Codex ? "Codex" : "Antigravity"; }
+std::string title(size_t source) { return std::string(provider_table[source].title); }
+bool is_cli(size_t source) { return provider_table[source].kind == SourceKind::Cli; }
 
 void clear_timer(guint& id) {
     if (id) g_source_remove(std::exchange(id, 0));
@@ -107,7 +107,7 @@ class Watch : public std::enable_shared_from_this<Watch> {
 public:
     explicit Watch(GApplication* app) : app_(app) {
         for (auto& sample : load_cache(cache_file_))
-            sources_[sample.provider == Provider::Codex ? 0 : 1].state.last = std::move(sample);
+            sources_[index(sample.provider)].state.last = std::move(sample);
         autostart_ = autostart_enabled();
     }
 
@@ -117,7 +117,8 @@ public:
             [this]{ toggle_startup(); }, [this]{ g_application_quit(app_); },
             [](const std::string& message){ g_warning("yrs-watch: %s", message.c_str()); },
             [this](size_t group){
-                if (group < sources_.size()) launch(group);
+                // Menu blocks follow rendered_sources_, then the system block.
+                if (group < rendered_sources_.size()) launch(rendered_sources_[group]);
                 else if (visible_) sample_system();
                 render();
                 arm();
@@ -139,7 +140,8 @@ public:
 
 private:
     GApplication* app_;
-    std::array<Source, 2> sources_;
+    std::array<Source, provider_count> sources_;
+    std::vector<size_t> rendered_sources_; // Source index of each quota block in the menu.
     std::filesystem::path cache_file_ = std::filesystem::path(g_get_user_cache_dir()) / "yrs-watch" / "quota.cache";
     std::unique_ptr<Tray> tray_;
     guint schedule_timer_ = 0, system_timer_ = 0, sleep_signal_ = 0;
@@ -178,6 +180,12 @@ private:
         }, this);
     }
 
+    bool cli_busy() const {
+        for (size_t i = 0; i < sources_.size(); ++i)
+            if (is_cli(i) && sources_[i].busy) return true;
+        return false;
+    }
+
     struct Delivery {
         std::weak_ptr<Watch> target;
         size_t index;
@@ -188,7 +196,7 @@ private:
         auto& source = sources_[i];
         if (source.busy) return;
         // Each official client briefly loads a large runtime. Keep only one alive at a time.
-        if (std::ranges::any_of(sources_, [](const Source& active){ return active.busy; })) {
+        if (is_cli(i) && cli_busy()) {
             source.queued = true;
             return;
         }
@@ -196,7 +204,7 @@ private:
         source.attempted = source.busy = true;
         source.started_at = now_epoch();
         source.worker = std::jthread([target = weak_from_this(), i](std::stop_token stop) {
-            auto result = fetch_quota(providers[i], stop);
+            auto result = fetch_quota(provider_table[i].id, stop);
             if (stop.stop_requested()) return;
             // Always dispatch to the GUI context, including during application shutdown.
             g_idle_add_full(G_PRIORITY_DEFAULT, [](gpointer data) -> gboolean {
@@ -244,8 +252,8 @@ private:
                 case Alert::Kind::Exhausted: body += " · 额度已用尽"; break;
                 case Alert::Kind::Recovered: body += " · 额度已恢复"; break;
             }
-            tray_->notify(name(providers[i]), body, alert.kind != Alert::Kind::Recovered,
-                          std::string(name(providers[i])) + "/" + alert.row_id);
+            tray_->notify(title(i), body, alert.kind != Alert::Kind::Recovered,
+                          std::string(provider_table[i].key) + "/" + alert.row_id);
         }
     }
 
@@ -340,15 +348,19 @@ private:
         TrayView view;
         view.tooltip = "yrs-watch";
         view.autostart = autostart_;
-        view.defer_font_query = std::ranges::any_of(sources_, [](const Source& source) {
-            return source.busy || source.queued;
-        });
+        // Measuring fonts spawns a helper; wait until no heavy client is running.
+        view.defer_font_query = false;
+        for (size_t i = 0; i < sources_.size(); ++i)
+            if (is_cli(i) && (sources_[i].busy || sources_[i].queued)) view.defer_font_query = true;
         const Epoch now = now_epoch();
+        rendered_sources_.clear();
         for (size_t i = 0; i < sources_.size(); ++i) {
             const auto& source = sources_[i];
             const auto& last = source.state.last;
+            if (provider_table[i].hide_without_data && !last) continue;
+            rendered_sources_.push_back(i);
             TrayGroup group;
-            group.title = name(providers[i]);
+            group.title = title(i);
             std::string status = source.state.error;
             if (source.busy) status = "刷新中…";
             else if (source.queued) status = "等待刷新";
