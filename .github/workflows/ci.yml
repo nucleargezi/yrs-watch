@@ -18,9 +18,9 @@ jobs:
     env:
       STEP: |
         step() {
-          local name=$1; shift
-          timeout 600 "$@" > step.log 2>&1
-          local status=$?
+          local name=$1 status=0; shift
+          # GitHub runs steps with bash -e; keep going so the log is reported.
+          timeout 600 "$@" > step.log 2>&1 || status=$?
           cat step.log
           if [ $status -ne 0 ]; then
             echo "::error title=$name (exit $status)::$(tail -c 3500 step.log | tr '\n' '|')"
