@@ -68,11 +68,15 @@ def cycle():
                                "PrepareForSleep", GLib.Variant("(b)", (sleeping,)))
     return GLib.SOURCE_CONTINUE
 
-try:
+add_signal = None
+try:  # Newer PyGObject moves Unix signals to GLibUnix; older ones lack signal_add there.
+    import gi
+    gi.require_version("GLibUnix", "2.0")
     from gi.repository import GLibUnix
-    add_signal = GLibUnix.signal_add
-except ImportError:
-    add_signal = GLib.unix_signal_add
+    add_signal = getattr(GLibUnix, "signal_add", None)
+except (ImportError, ValueError):
+    pass
+add_signal = add_signal or GLib.unix_signal_add
 add_signal(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, cycle)
 Gio.bus_own_name(Gio.BusType.SYSTEM, "org.freedesktop.login1", Gio.BusNameOwnerFlags.NONE, None, acquired, None)
 GLib.MainLoop().run()
