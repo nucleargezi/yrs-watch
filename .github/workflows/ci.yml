@@ -22,7 +22,7 @@ jobs:
           run sudo apt-get update
           run sudo apt-get install -y --no-install-recommends g++ make pkg-config \
             libglib2.0-dev libglib2.0-bin libjson-glib-dev libpango1.0-dev \
-            python3-gi dbus fonts-dejavu-core
+            python3-gi dbus fonts-dejavu-core fonts-wqy-microhei
       - name: Build
         run: |
           set -o pipefail
