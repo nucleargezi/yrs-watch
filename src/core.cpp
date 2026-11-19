@@ -77,9 +77,14 @@ void evaluate_row(const QuotaRow& row, Epoch observed, double threshold, AlertHi
 
 std::vector<Alert> apply_sample(ProviderState& state, QuotaSample sample, double low_fraction, Epoch now) {
     std::vector<Alert> alerts;
+    // An omitted account ID is unknown, not a different account.
     const bool same_account = state.last && state.last->provider == sample.provider &&
-                              state.last->account == sample.account;
-    if (same_account && sample.observed_at < state.last->observed_at) return alerts;
+        (sample.account.empty() || state.last->account.empty() || state.last->account == sample.account);
+    if (same_account && sample.observed_at < state.last->observed_at) {
+        state.error.clear();
+        return alerts;
+    }
+    if (same_account && sample.account.empty()) sample.account = state.last->account;
     sample.alerts = same_account ? state.last->alerts : decltype(sample.alerts){};
     // Retain deduplication across briefly omitted rows, without keeping obsolete pools indefinitely.
     constexpr Epoch retention = 90 * 24 * 3600;
@@ -218,6 +223,8 @@ bool save_cache(const std::filesystem::path& path, const std::vector<QuotaSample
     if (!data || length > max_cache_size) return false;
     const auto parent = path.parent_path();
     if (!parent.empty() && g_mkdir_with_parents(parent.c_str(), 0700) != 0) return false;
+    // Not g_file_set_contents_full(): recent GLib keeps the mode of the file it
+    // replaces, and the cache must always end up 0600.
     auto temp = path.string() + ".XXXXXX";
     const int fd = g_mkstemp_full(temp.data(), O_RDWR | O_CLOEXEC, 0600);
     if (fd < 0) return false;
@@ -228,18 +235,20 @@ bool save_cache(const std::filesystem::path& path, const std::vector<QuotaSample
         if (n <= 0) break;
         done += static_cast<std::size_t>(n);
     }
+    // Flush before the rename so a power loss cannot leave an empty cache behind.
+    const bool synced = done == length && fsync(fd) == 0;
     const bool closed = close(fd) == 0;
-    if (done == length && closed && rename(temp.c_str(), path.c_str()) == 0) return true;
+    if (synced && closed && rename(temp.c_str(), path.c_str()) == 0) return true;
     unlink(temp.c_str());
     return false;
 }
 
-std::vector<QuotaSample> load_cache(const std::filesystem::path& path) {
+std::optional<std::string> read_private_file(const std::filesystem::path& path, std::size_t max_size) {
     const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
     if (fd < 0) return {};
     struct stat info{};
     if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode) || info.st_uid != geteuid() ||
-        (info.st_mode & 0077) != 0 || info.st_size <= 0 || info.st_size > static_cast<off_t>(max_cache_size)) {
+        (info.st_mode & 0077) != 0 || info.st_size <= 0 || info.st_size > static_cast<off_t>(max_size)) {
         close(fd);
         return {};
     }
@@ -252,8 +261,15 @@ std::vector<QuotaSample> load_cache(const std::filesystem::path& path) {
         done += static_cast<std::size_t>(n);
     }
     close(fd);
+    if (done != data.size()) return {};
+    return data;
+}
+
+std::vector<QuotaSample> load_cache(const std::filesystem::path& path) {
+    const auto data = read_private_file(path, max_cache_size);
+    if (!data) return {};
     g_autoptr(GKeyFile) file = g_key_file_new();
-    if (done != data.size() || !g_key_file_load_from_data(file, data.data(), data.size(), G_KEY_FILE_NONE, nullptr) ||
+    if (!g_key_file_load_from_data(file, data->data(), data->size(), G_KEY_FILE_NONE, nullptr) ||
         g_key_file_get_integer(file, "cache", "version", nullptr) != 1) return {};
     std::vector<QuotaSample> samples;
     for (Provider provider : {Provider::Codex, Provider::Antigravity}) {

@@ -84,6 +84,17 @@ void test_quota(const fs::path& path) {
     check(apply(state, unknown).empty() && !state.last->rows[0].remaining, "unknown preserves recovery state");
     expect(apply(state, observation(.05, 5003, 11000, "account-b")), Alert::Kind::Recovered);
 
+    // An omitted account ID is unknown and keeps the alert history of the known account.
+    ProviderState flapping;
+    expect(apply(flapping, observation(.1, 1000, 2000, "account-a")), Alert::Kind::Low);
+    check(apply(flapping, observation(.1, 1001, 2000, "")).empty() && flapping.last->account == "account-a",
+          "missing account ID is not a new account");
+    check(apply(flapping, observation(.1, 1002, 2000, "account-a")).empty(), "account ID reappears");
+    expect(apply(flapping, observation(.1, 1003, 2000, "account-c")), Alert::Kind::Low);
+    flapping.error = "等待连接";
+    check(apply(flapping, observation(.1, 900, 2000, "account-c")).empty() && flapping.error.empty() &&
+          flapping.last->observed_at == 1003, "out-of-order success clears the error");
+
     ProviderState quantity;
     other.rows[0].quantity = 0;
     expect(apply(quantity, other), Alert::Kind::Exhausted);

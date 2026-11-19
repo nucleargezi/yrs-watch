@@ -223,10 +223,8 @@ private:
                 case QuotaError::NeedsLogin: source.state.error = "需要登录"; break;
                 case QuotaError::Missing: source.state.error = "未找到客户端"; break;
                 case QuotaError::Timeout: source.state.error = "等待连接 · 查询超时"; break;
-                default:
-                    source.state.error = result.message.empty() || result.message == "客户端暂时无法查询额度"
-                        ? "等待连接" : result.message;
-                    break;
+                case QuotaError::Offline: source.state.error = "等待连接"; break;
+                default: source.state.error = result.message.empty() ? "等待连接" : result.message; break;
             }
         }
         for (size_t pending = 0; pending < sources_.size(); ++pending)
@@ -236,7 +234,9 @@ private:
         for (const auto& alert : alerts) {
             std::string body = alert.label;
             switch (alert.kind) {
-                case Alert::Kind::Low: body += " · 剩余额度已降至 20% 或以下"; break;
+                case Alert::Kind::Low:
+                    body += " · 剩余额度已降至 " + decimal(low_quota_fraction * 100, 0) + "% 或以下";
+                    break;
                 case Alert::Kind::Exhausted: body += " · 额度已用尽"; break;
                 case Alert::Kind::Recovered: body += " · 额度已恢复"; break;
             }
@@ -317,7 +317,7 @@ private:
                 for (const auto& row : last->rows) {
                     group.quota.push_back(quota_cells(row, now, group.title));
                     if (source.state.error.empty() && !stale(*last, now, 960) && !expired(row, now) &&
-                        ((row.remaining && *row.remaining <= .20) ||
+                        ((row.remaining && *row.remaining <= low_quota_fraction) ||
                         (!row.remaining && row.quantity && *row.quantity == 0))) view.attention = true;
                 }
                 if (status.empty() && stale(*last, now, 960)) status = "缓存";

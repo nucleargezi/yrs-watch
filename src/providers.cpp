@@ -81,7 +81,7 @@ bool suggests_login(const std::string& message) {
 
 [[noreturn]] void cli_failure(const std::string& text) {
     if (suggests_login(text)) fail(QuotaError::NeedsLogin, "请先在对应客户端登录订阅账户");
-    fail(QuotaError::Unavailable, "客户端暂时无法查询额度");
+    fail(QuotaError::Offline, {});
 }
 
 // Both ends of stdin/stdout share a socketpair. MSG_NOSIGNAL keeps a CLI
@@ -236,12 +236,21 @@ using Json = std::unique_ptr<JsonParser, decltype(&g_object_unref)>;
 
 Json parse(const std::string& data, const std::string& diagnostics = {}) {
     Json parser(json_parser_new(), g_object_unref);
-    if (!json_parser_load_from_data(parser.get(), data.data(), data.size(), nullptr)) {
-        if (suggests_login(data)) cli_failure(data);
-        if (suggests_login(diagnostics)) cli_failure(diagnostics);
-        invalid_response();
+    if (json_parser_load_from_data(parser.get(), data.data(), data.size(), nullptr)) return parser;
+    // Some CLI builds print notices before the JSON document. Retry from each
+    // line that opens an object, starting with the last one.
+    std::size_t end = data.size();
+    for (int attempt = 0; attempt < 16 && end > 0; ++attempt) {
+        const auto start = data.rfind("\n{", end - 1);
+        if (start == std::string::npos) break;
+        const auto offset = start + 1;
+        if (json_parser_load_from_data(parser.get(), data.data() + offset, data.size() - offset, nullptr))
+            return parser;
+        end = start;
     }
-    return parser;
+    if (suggests_login(data)) cli_failure(data);
+    if (suggests_login(diagnostics)) cli_failure(diagnostics);
+    invalid_response();
 }
 
 JsonObject* object(JsonNode* n) {

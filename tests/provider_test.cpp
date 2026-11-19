@@ -135,6 +135,28 @@ echo '{"id":2,"error":{"code":-32000,"message":"not logged in: private@example.i
     CHECK(unauth.error == QuotaError::NeedsLogin && !unauth.sample);
     CHECK(unauth.message.find("private") == std::string::npos);
 
+    // A failed lookup that is not about login is a neutral offline state.
+    script(dir / "codex", R"sh(
+read -r req
+echo '{"id":1,"result":{}}'
+read -r ready
+read -r query
+echo '{"id":2,"error":{"code":-32000,"message":"network unavailable"}}'
+)sh");
+    auto offline = fetch_quota(Provider::Codex);
+    CHECK(offline.error == QuotaError::Offline && !offline.sample);
+
+    // Notices printed before the JSON document are skipped.
+    std::filesystem::remove(dir / "agy");
+    script(dir / "agy", R"sh(
+if [ "$1" = "--version" ]; then echo 1.6.0; exit; fi
+echo 'Update available: 1.7.0'
+echo '{ not json either'
+echo '{"status":"SUCCESS","command":{"data":{"groups":[{"name":"Gemini","buckets":[{"id":"g-week","window":"weekly","remaining_fraction":0.5}]}]}}}'
+)sh");
+    auto noisy = fetch_quota(Provider::Antigravity);
+    CHECK(noisy.sample && noisy.sample->rows.size() == 1 && noisy.sample->rows[0].remaining == 0.5);
+
     script(dir / "codex", R"sh(
 /bin/sleep 60 &
 echo "$$ $!" > "$PIDS"

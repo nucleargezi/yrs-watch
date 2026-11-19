@@ -51,14 +51,18 @@ struct Alert {
 };
 
 Epoch now_epoch();
+// Remaining fraction at or below which a quota window is reported as low.
+inline constexpr double low_quota_fraction = 0.20;
 bool stale(const QuotaSample& sample, Epoch now, Epoch max_age = 900);
 bool expired(const QuotaRow& row, Epoch now);
 std::vector<Alert> apply_sample(ProviderState& state, QuotaSample sample,
-                                double low_fraction = 0.20, Epoch now = now_epoch());
+                                double low_fraction = low_quota_fraction, Epoch now = now_epoch());
 
-// The parent directory is created with mode 0700. Each replacement is atomic and 0600.
+// The parent directory is created with mode 0700. Each replacement is atomic, fsynced and 0600.
 bool save_cache(const std::filesystem::path& path, const std::vector<QuotaSample>& samples);
 std::vector<QuotaSample> load_cache(const std::filesystem::path& path);
+// Reads a regular file owned by the current user and inaccessible to others, without following symlinks.
+std::optional<std::string> read_private_file(const std::filesystem::path& path, std::size_t max_size);
 
 struct Memory { std::uint64_t used, total, available; }; // Bytes.
 struct CpuTicks { std::uint64_t active, total; };

@@ -6,7 +6,9 @@
 
 namespace yrswatch {
 
-enum class QuotaError { None, NeedsLogin, Missing, Unavailable, Cancelled, Timeout };
+// Offline: the client ran but could not complete the lookup, usually because its
+// service is unreachable. The UI shows a neutral waiting state rather than a message.
+enum class QuotaError { None, NeedsLogin, Missing, Offline, Unavailable, Cancelled, Timeout };
 
 struct QuotaResult {
     std::optional<QuotaSample> sample;
