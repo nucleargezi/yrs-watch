@@ -4,24 +4,39 @@ on:
   push:
   pull_request:
 
+# Failing steps repeat the tail of their output as an error annotation, which
+# stays readable without signing in to download the full log.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   test:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends g++ make pkg-config \
-            libglib2.0-dev libjson-glib-dev libpango1.0-dev \
-            python3-gi gir1.2-glib-2.0 dbus dbus-bin fonts-dejavu-core
+          set -o pipefail
+          run() { "$@" 2>&1 | tee step.log || { echo "::error title=$1::$(tail -c 3000 step.log | tr '\n' '|')"; exit 1; }; }
+          run sudo apt-get update
+          run sudo apt-get install -y --no-install-recommends g++ make pkg-config \
+            libglib2.0-dev libglib2.0-bin libjson-glib-dev libpango1.0-dev \
+            python3-gi dbus fonts-dejavu-core
       - name: Build
-        run: make -j
+        run: |
+          set -o pipefail
+          make -j 2>&1 | tee step.log || { echo "::error title=build::$(tail -c 3000 step.log | tr '\n' '|')"; exit 1; }
       - name: Test
-        run: make test
+        run: |
+          set -o pipefail
+          make test 2>&1 | tee step.log || { echo "::error title=test::$(tail -c 3000 step.log | tr '\n' '|')"; exit 1; }
       - name: Test with sanitizers
-        run: make -j test-asan
+        run: |
+          set -o pipefail
+          make -j test-asan 2>&1 | tee step.log || { echo "::error title=asan::$(tail -c 3000 step.log | tr '\n' '|')"; exit 1; }
       - name: Test with NDEBUG
         run: |
+          set -o pipefail
           make clean
-          make test CXXFLAGS="-O2 -DNDEBUG"
+          make test CXXFLAGS="-O2 -DNDEBUG" 2>&1 | tee step.log || { echo "::error title=ndebug::$(tail -c 3000 step.log | tr '\n' '|')"; exit 1; }
