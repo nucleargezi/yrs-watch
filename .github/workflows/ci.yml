@@ -4,8 +4,6 @@ on:
   push:
   pull_request:
 
-# Failing steps repeat the tail of their output as an error annotation, which
-# stays readable without signing in to download the full log.
 defaults:
   run:
     shell: bash
@@ -13,30 +11,39 @@ defaults:
 jobs:
   test:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # Each step writes its output to a file (a pipe could be held open by a
+    # leftover process), prints it, and on failure repeats the tail as an error
+    # annotation, which stays readable without signing in.
+    env:
+      STEP: |
+        step() {
+          local name=$1; shift
+          timeout 600 "$@" > step.log 2>&1
+          local status=$?
+          cat step.log
+          if [ $status -ne 0 ]; then
+            echo "::error title=$name (exit $status)::$(tail -c 3500 step.log | tr '\n' '|')"
+          fi
+          return $status
+        }
     steps:
       - uses: actions/checkout@v5
       - name: Install dependencies
         run: |
-          set -o pipefail
-          run() { "$@" 2>&1 | tee step.log || { echo "::error title=$1::$(tail -c 3000 step.log | tr '\n' '|')"; exit 1; }; }
-          run sudo apt-get update
-          run sudo apt-get install -y --no-install-recommends g++ make pkg-config \
+          eval "$STEP"
+          step apt-update sudo apt-get update
+          step apt-install sudo apt-get install -y --no-install-recommends g++ make pkg-config \
             libglib2.0-dev libglib2.0-bin libjson-glib-dev libpango1.0-dev \
             python3-gi dbus fonts-dejavu-core fonts-wqy-microhei
       - name: Build
-        run: |
-          set -o pipefail
-          make -j 2>&1 | tee step.log || { echo "::error title=build::$(tail -c 3000 step.log | tr '\n' '|')"; exit 1; }
+        run: eval "$STEP"; step build make -j
       - name: Test
-        run: |
-          set -o pipefail
-          make test 2>&1 | tee step.log || { echo "::error title=test::$(tail -c 3000 step.log | tr '\n' '|')"; exit 1; }
+        run: eval "$STEP"; step test make test
       - name: Test with sanitizers
-        run: |
-          set -o pipefail
-          make -j test-asan 2>&1 | tee step.log || { echo "::error title=asan::$(tail -c 3000 step.log | tr '\n' '|')"; exit 1; }
+        run: eval "$STEP"; step asan make -j test-asan
       - name: Test with NDEBUG
         run: |
-          set -o pipefail
+          eval "$STEP"
           make clean
-          make test CXXFLAGS="-O2 -DNDEBUG" 2>&1 | tee step.log || { echo "::error title=ndebug::$(tail -c 3000 step.log | tr '\n' '|')"; exit 1; }
+          step ndebug make test CXXFLAGS="-O2 -DNDEBUG"

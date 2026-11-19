@@ -325,6 +325,19 @@ if __name__ == "__main__":
             root = Path(temp)
             env = os.environ | {"XDG_CACHE_HOME": str(root / "cache"), "XDG_CONFIG_HOME": str(root / "config"),
                                 "XDG_DATA_HOME": str(root / "data"), "GSETTINGS_BACKEND": "memory"}
-            subprocess.run(["dbus-run-session", "--", sys.executable, __file__,
-                            str(Path(sys.argv[1]).resolve()), temp], env=env, check=True, timeout=75)
+            # A process group lets a timeout retire every mock and bus, so none keeps the caller's output open.
+            session = subprocess.Popen(["dbus-run-session", "--", sys.executable, __file__,
+                                        str(Path(sys.argv[1]).resolve()), temp], env=env, start_new_session=True)
+            try:
+                status = session.wait(timeout=75)
+            except subprocess.TimeoutExpired:
+                status = "timed out"
+            finally:
+                try:
+                    os.killpg(session.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                session.wait()
+            if status != 0:
+                raise SystemExit(f"Desktop integration failed: {status}")
         print("Desktop integration passed")
