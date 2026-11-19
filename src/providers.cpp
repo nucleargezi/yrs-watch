@@ -187,7 +187,7 @@ public:
             if (eof_) {
                 if (!line && !buffer_.empty()) return std::exchange(buffer_, {});
                 if (errors_.value < 0) cli_failure(diagnostics_);
-                // stdout 已关闭但 stderr 可能仍在写入诊断信息, 有界排空避免丢掉登录提示
+                // stdout is closed, but stderr may still carry a login hint. Drain it briefly.
                 if (!drain_until) drain_until = std::min(deadline_, Clock::now() + 200ms);
             }
             const auto limit = drain_until ? *drain_until : deadline_;

@@ -1,5 +1,5 @@
 #include "schedule.hpp"
-#include <cassert>
+#include "check.hpp"
 
 int main() {
     using namespace yrswatch;
@@ -12,15 +12,16 @@ int main() {
     row.reset_at = 130;
     sample.rows.push_back(row);
     state.last = sample;
-    assert(s.next_reset(state) == 100);
+    CHECK(s.next_reset(state) == 100);
     s.checked_reset = 100;
-    assert(s.next_reset(state) == 130);
+    CHECK(s.next_reset(state) == 130);
     s.completed(false, 11);
-    assert(s.due == 131 && !s.next_reset(state));
+    CHECK(s.due == 131 && !s.next_reset(state));
     s.completed(false, 131);
-    assert(s.due == 431);
+    CHECK(s.due == 431);
     s.completed(false, 431);
-    assert(s.due == 1331);
+    CHECK(s.due == 1331);
     s.completed(true, 500);
-    assert(s.due == 1400 && s.next_reset(state) == 130);
+    CHECK(s.due == 1400 && s.next_reset(state) == 130);
+    std::puts("schedule tests passed");
 }

@@ -115,7 +115,7 @@ void test_quota(const fs::path& path) {
     std::ofstream(path) << "[cache]\nversion=2\n";
     check(load_cache(path).empty(), "unknown cache version");
 
-    // 测试显式 disabled 字段往返与禁止告警
+    // An explicit disabled field round-trips and never alerts.
     QuotaSample disabled_sample = observation(0.0, 2000);
     disabled_sample.rows[0].disabled = true;
     disabled_sample.rows[0].remaining.reset();
@@ -127,7 +127,7 @@ void test_quota(const fs::path& path) {
     check(loaded_disabled.size() == 1 && loaded_disabled[0].rows[0].disabled &&
           loaded_disabled[0].rows[0].label == "模型额度", "disabled round trip");
 
-    // 测试旧版仅含 "（未开放）" 后缀缓存文件的兼容迁移
+    // Legacy caches that only mark disabled rows with a label suffix are migrated.
     std::ofstream(path)
         << "[cache]\nversion=1\n\n"
         << "[antigravity]\nobserved=1500\nrows=2\nalerts=0\n\n"

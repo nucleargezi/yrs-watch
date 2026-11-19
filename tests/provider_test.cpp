@@ -1,6 +1,6 @@
 #include "providers.hpp"
 
-#include <cassert>
+#include "check.hpp"
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -16,7 +16,7 @@ void script(const std::filesystem::path& path, std::string_view body) {
     std::ofstream file(path);
     file << "#!/bin/sh\n" << body;
     file.close();
-    assert(chmod(path.c_str(), 0700) == 0);
+    CHECK(chmod(path.c_str(), 0700) == 0);
 }
 
 void stopped(pid_t pid) {
@@ -24,14 +24,14 @@ void stopped(pid_t pid) {
     std::string line;
     if (std::getline(stat, line)) {
         auto end = line.rfind(')');
-        assert(end != std::string::npos && (line[end + 2] == 'Z' || line[end + 2] == 'X'));
+        CHECK(end != std::string::npos && (line[end + 2] == 'Z' || line[end + 2] == 'X'));
     }
 }
 } // namespace
 
 int main() {
     char pattern[] = "/tmp/yrs-watch-provider-test-XXXXXX";
-    assert(mkdtemp(pattern));
+    CHECK(mkdtemp(pattern));
     std::filesystem::path dir(pattern);
     std::filesystem::path empty_home = dir / "empty-home";
     std::filesystem::create_directory(empty_home);
@@ -56,12 +56,12 @@ echo '{"method":"another/notification"}'
 echo '{"id":2,"result":{"accountId":"opaque-example","rateLimits":{"primary":{"usedPercent":99}},"rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":25,"windowDurationMins":300,"resetsAt":2000000000},"secondary":{"usedPercent":100,"windowDurationMins":10080,"resetsAt":null}}}}}'
 )sh");
     auto codex = fetch_quota(Provider::Codex);
-    assert(codex.sample && codex.sample->rows.size() == 2);
-    assert(!codex.sample->account.empty() && codex.sample->account != "opaque-example");
+    CHECK(codex.sample && codex.sample->rows.size() == 2);
+    CHECK(!codex.sample->account.empty() && codex.sample->account != "opaque-example");
     auto& primary = codex.sample->rows[0];
-    assert(primary.id == "codex:primary" && primary.remaining == 0.75);
-    assert(primary.reset_at == 2000000000 && primary.window == "5 小时");
-    assert(codex.sample->rows[1].remaining == 0 && !codex.sample->rows[1].reset_at);
+    CHECK(primary.id == "codex:primary" && primary.remaining == 0.75);
+    CHECK(primary.reset_at == 2000000000 && primary.window == "5 小时");
+    CHECK(codex.sample->rows[1].remaining == 0 && !codex.sample->rows[1].reset_at);
 
     script(dir / "agy", R"sh(
 [ "$AGY_CLI_DISABLE_AUTO_UPDATE" = true ] || exit 9
@@ -70,32 +70,32 @@ if [ "$1" = "--version" ]; then printf x >> "$VERSION_PROBES"; echo 1.5.9; exit;
 echo '{"status":"SUCCESS","num_turns":0,"command":{"name":"usage","data":{"groups":[{"name":"Gemini","buckets":[{"id":"g-week","window":"weekly","remaining_fraction":0,"reset_time":"2026-11-01T08:00:00+08:00"},{"id":"g-5h","window":"5h","disabled":true}]}]}}}'
 )sh");
     auto agy = fetch_quota(Provider::Antigravity);
-    assert(agy.sample && agy.sample->rows.size() == 2);
-    assert(agy.sample->rows[0].remaining == 0.0);
-    assert(agy.sample->rows[0].reset_at == 1793491200);
-    assert(!agy.sample->rows[1].remaining && !agy.sample->rows[1].reset_at);
-    assert(agy.sample->rows[1].disabled && agy.sample->rows[1].label.find("未开放") == std::string::npos);
-    assert(fetch_quota(Provider::Antigravity).sample);
-    assert(std::filesystem::file_size(dir / "version-probes") == 1);
+    CHECK(agy.sample && agy.sample->rows.size() == 2);
+    CHECK(agy.sample->rows[0].remaining == 0.0);
+    CHECK(agy.sample->rows[0].reset_at == 1793491200);
+    CHECK(!agy.sample->rows[1].remaining && !agy.sample->rows[1].reset_at);
+    CHECK(agy.sample->rows[1].disabled && agy.sample->rows[1].label.find("未开放") == std::string::npos);
+    CHECK(fetch_quota(Provider::Antigravity).sample);
+    CHECK(std::filesystem::file_size(dir / "version-probes") == 1);
 
     std::filesystem::remove(dir / "agy");
     script(dir / "agy", R"sh(
 if [ "$1" = "--version" ]; then echo 1.1.10; exit; fi
 echo called > "$PIDS"
 )sh");
-    assert(fetch_quota(Provider::Antigravity).error == QuotaError::Unavailable);
-    assert(!std::filesystem::exists(dir / "pids"));
+    CHECK(fetch_quota(Provider::Antigravity).error == QuotaError::Unavailable);
+    CHECK(!std::filesystem::exists(dir / "pids"));
 
-    // 验证带前缀版本号解析以及 Go 零值时间过滤
+    // Prefixed version strings parse, and Go zero timestamps are ignored.
     std::filesystem::remove(dir / "agy");
     script(dir / "agy", R"sh(
 if [ "$1" = "--version" ]; then echo "agy v1.6.0-beta.1"; exit; fi
 echo '{"status":"SUCCESS","command":{"name":"usage","data":{"groups":[{"name":"Gemini","buckets":[{"id":"g-zero","window":"daily","remaining_fraction":0.5,"reset_time":"0001-01-01T00:00:00Z"}]}]}}}'
 )sh");
     auto prefixed = fetch_quota(Provider::Antigravity);
-    assert(prefixed.sample && prefixed.sample->rows.size() == 1 && !prefixed.sample->rows[0].reset_at);
+    CHECK(prefixed.sample && prefixed.sample->rows.size() == 1 && !prefixed.sample->rows[0].reset_at);
 
-    // 验证 Codex rateLimits 回退分支
+    // Codex falls back to rateLimits when no per-limit buckets exist.
     script(dir / "codex", R"sh(
 read -r init
 echo '{"id":1,"result":{}}'
@@ -104,10 +104,10 @@ read -r query
 echo '{"id":2,"result":{"rateLimits":{"limitId":"fallback","limitName":"Fallback","primary":{"usedPercent":40,"windowDurationMins":300,"resetsAt":2000000000}}}}'
 )sh");
     auto fallback = fetch_quota(Provider::Codex);
-    assert(fallback.sample && fallback.sample->rows.size() == 1 && fallback.sample->rows[0].id == "fallback:primary");
-    assert(fallback.sample->rows[0].remaining == 0.6);
+    CHECK(fallback.sample && fallback.sample->rows.size() == 1 && fallback.sample->rows[0].id == "fallback:primary");
+    CHECK(fallback.sample->rows[0].remaining == 0.6);
 
-    // 验证 stdout 立即关闭后仍能读取延迟到达的 stderr 登录诊断
+    // A login hint arriving on stderr after stdout closed is still classified.
     script(dir / "codex", R"sh(
 exec 1>&-
 /bin/sleep 0.03
@@ -115,14 +115,14 @@ echo "authentication required" >&2
 exit 1
 )sh");
     auto delayed_err = fetch_quota(Provider::Codex);
-    assert(delayed_err.error == QuotaError::NeedsLogin && !delayed_err.sample);
+    CHECK(delayed_err.error == QuotaError::NeedsLogin && !delayed_err.sample);
 
-    // 验证超过 2 MiB 输出被截断并报错
+    // Output above 2 MiB is rejected.
     script(dir / "codex", R"sh(
 /bin/dd if=/dev/zero bs=65536 count=34 2>/dev/null
 )sh");
     auto oversized = fetch_quota(Provider::Codex);
-    assert(oversized.error == QuotaError::Unavailable && !oversized.sample);
+    CHECK(oversized.error == QuotaError::Unavailable && !oversized.sample);
 
     script(dir / "codex", R"sh(
 read -r req
@@ -132,8 +132,8 @@ read -r query
 echo '{"id":2,"error":{"code":-32000,"message":"not logged in: private@example.invalid"}}'
 )sh");
     auto unauth = fetch_quota(Provider::Codex);
-    assert(unauth.error == QuotaError::NeedsLogin && !unauth.sample);
-    assert(unauth.message.find("private") == std::string::npos);
+    CHECK(unauth.error == QuotaError::NeedsLogin && !unauth.sample);
+    CHECK(unauth.message.find("private") == std::string::npos);
 
     script(dir / "codex", R"sh(
 /bin/sleep 60 &
@@ -147,21 +147,22 @@ wait
         std::this_thread::sleep_for(5ms);
         std::ifstream(dir / "pids") >> child >> grandchild;
     }
-    assert(child > 0 && grandchild > 0);
+    CHECK(child > 0 && grandchild > 0);
     auto start = std::chrono::steady_clock::now();
     worker.request_stop();
     worker.join();
-    assert(cancelled.error == QuotaError::Cancelled);
-    assert(std::chrono::steady_clock::now() - start < 2s);
+    CHECK(cancelled.error == QuotaError::Cancelled);
+    CHECK(std::chrono::steady_clock::now() - start < 2s);
     stopped(child);
     // SIGKILL delivery to an orphan may finish just after waitpid on the leader.
     std::this_thread::sleep_for(30ms);
     stopped(grandchild);
 
-    // 验证找不到可执行文件时返回 Missing (需同时屏蔽 PATH 和 HOME 回退目录)
+    // A missing executable reports Missing (both PATH and HOME fallbacks are hidden).
     setenv("PATH", empty_home.c_str(), 1);
-    assert(fetch_quota(Provider::Codex).error == QuotaError::Missing);
-    assert(fetch_quota(Provider::Antigravity).error == QuotaError::Missing);
+    CHECK(fetch_quota(Provider::Codex).error == QuotaError::Missing);
+    CHECK(fetch_quota(Provider::Antigravity).error == QuotaError::Missing);
 
     std::filesystem::remove_all(dir);
+    std::puts("provider tests passed");
 }

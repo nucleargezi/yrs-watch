@@ -41,7 +41,7 @@ bool set_autostart(bool enabled) {
     std::error_code error;
     auto exe = fs::read_symlink("/proc/self/exe", error);
     if (error) return false;
-    // 运行期间若发生覆盖安装, /proc/self/exe 可能带有 " (deleted)" 后缀
+    // After an in-place reinstall, /proc/self/exe may carry a " (deleted)" suffix.
     constexpr std::string_view deleted_suffix = " (deleted)";
     auto exe_str = exe.string();
     if (exe_str.ends_with(deleted_suffix) && !fs::exists(exe, error)) {

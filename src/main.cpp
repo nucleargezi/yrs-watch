@@ -74,7 +74,7 @@ std::string quota_amount(const QuotaRow& row) {
         const auto tenths = std::lround(percent * 10);
         if (percent > 0 && tenths == 0) return "<0.1%";
         if (percent < 100 && tenths == 1000) return ">99.9%";
-        return decimal(tenths / 10.0, tenths % 10 == 0 ? 0 : 1) + "%";
+        return decimal(static_cast<double>(tenths) / 10.0, tenths % 10 == 0 ? 0 : 1) + "%";
     }
     if (row.quantity) {
         auto amount = decimal(*row.quantity, std::trunc(*row.quantity) == *row.quantity ? 0 : 2);
@@ -160,7 +160,7 @@ private:
         for (const auto& source : sources_)
             if (!source.busy && !source.queued && (!earliest || deadline(source) < *earliest)) earliest = deadline(source);
         if (!earliest) return;
-        const auto seconds = std::clamp<std::int64_t>(*earliest - monotonic_seconds(), 1, 900);
+        const auto seconds = static_cast<guint>(std::clamp<std::int64_t>(*earliest - monotonic_seconds(), 1, 900));
         schedule_timer_ = g_timeout_add_seconds(seconds, [](gpointer data) -> gboolean {
             auto& watch = *static_cast<Watch*>(data);
             watch.schedule_timer_ = 0;
@@ -328,8 +328,8 @@ private:
             view.groups.push_back(std::move(group));
         }
         constexpr double gib = 1024.0 * 1024 * 1024;
-        const std::string ram = memory_ ? decimal(memory_->used / gib, 1) + " / " +
-            decimal(memory_->total / gib, 1) + " GiB" : "—";
+        const std::string ram = memory_ ? decimal(static_cast<double>(memory_->used) / gib, 1) + " / " +
+            decimal(static_cast<double>(memory_->total) / gib, 1) + " GiB" : "—";
         TrayGroup system;
         system.title = "系统";
         system.lines = {"内存　" + ram, "CPU　" + (cpu_ ? decimal(*cpu_ * 100, 0) + "%" : "—")};
@@ -348,11 +348,11 @@ int main(int argc, char** argv) {
     auto* app = g_application_new(app_id, G_APPLICATION_DEFAULT_FLAGS);
     Session session;
     g_signal_connect(app, "activate", G_CALLBACK(+[](GApplication* application, gpointer data) {
-        auto& session = *static_cast<Session*>(data);
-        if (session.watch) return;
+        auto& state = *static_cast<Session*>(data);
+        if (state.watch) return;
         g_application_hold(application);
-        session.watch = std::make_shared<Watch>(application);
-        session.watch->start();
+        state.watch = std::make_shared<Watch>(application);
+        state.watch->start();
     }), &session);
     auto quit = +[](gpointer data) -> gboolean {
         g_application_quit(G_APPLICATION(data));
