@@ -125,11 +125,14 @@ public:
         });
         render();
         arm();
+        watch_sleep();
     }
 
     ~Watch() {
         clear_timer(schedule_timer_);
         clear_timer(system_timer_);
+        if (sleep_signal_) g_dbus_connection_signal_unsubscribe(system_bus_, sleep_signal_);
+        g_clear_object(&system_bus_);
         for (auto& source : sources_) source.worker.request_stop();
         for (auto& source : sources_) if (source.worker.joinable()) source.worker.join();
     }
@@ -139,7 +142,8 @@ private:
     std::array<Source, 2> sources_;
     std::filesystem::path cache_file_ = std::filesystem::path(g_get_user_cache_dir()) / "yrs-watch" / "quota.cache";
     std::unique_ptr<Tray> tray_;
-    guint schedule_timer_ = 0, system_timer_ = 0;
+    guint schedule_timer_ = 0, system_timer_ = 0, sleep_signal_ = 0;
+    GDBusConnection* system_bus_ = nullptr;
     bool visible_ = false, autostart_ = false;
     std::optional<Memory> memory_;
     std::optional<CpuTicks> previous_cpu_;
@@ -240,13 +244,48 @@ private:
                 case Alert::Kind::Exhausted: body += " · 额度已用尽"; break;
                 case Alert::Kind::Recovered: body += " · 额度已恢复"; break;
             }
-            tray_->notify(name(providers[i]), body, alert.kind != Alert::Kind::Recovered);
+            tray_->notify(name(providers[i]), body, alert.kind != Alert::Kind::Recovered,
+                          std::string(name(providers[i])) + "/" + alert.row_id);
         }
     }
 
     void refresh() {
         for (size_t i = 0; i < sources_.size(); ++i) launch(i);
         render();
+        arm();
+    }
+
+    using WeakWatch = std::weak_ptr<Watch>;
+
+    // logind announces suspend and resume on the system bus. Without it, refreshes
+    // simply follow the regular schedule.
+    void watch_sleep() {
+        g_bus_get(G_BUS_TYPE_SYSTEM, nullptr, [](GObject*, GAsyncResult* res, gpointer data) {
+            std::unique_ptr<WeakWatch> weak(static_cast<WeakWatch*>(data));
+            g_autoptr(GError) error = nullptr;
+            g_autoptr(GDBusConnection) bus = g_bus_get_finish(res, &error);
+            auto self = weak->lock();
+            if (!self) return;
+            if (!bus) {
+                g_message("yrs-watch: no system bus, refresh after resume is disabled: %s", error->message);
+                return;
+            }
+            self->system_bus_ = G_DBUS_CONNECTION(g_object_ref(bus));
+            self->sleep_signal_ = g_dbus_connection_signal_subscribe(bus, "org.freedesktop.login1",
+                "org.freedesktop.login1.Manager", "PrepareForSleep", "/org/freedesktop/login1", nullptr,
+                G_DBUS_SIGNAL_FLAGS_NONE,
+                [](GDBusConnection*, const char*, const char*, const char*, const char*, GVariant* args, gpointer user) {
+                    gboolean sleeping = true;
+                    if (g_variant_is_of_type(args, G_VARIANT_TYPE("(b)"))) g_variant_get(args, "(b)", &sleeping);
+                    if (sleeping) return;
+                    if (auto watch = static_cast<WeakWatch*>(user)->lock()) watch->resumed();
+                }, new WeakWatch(self), [](gpointer user) { delete static_cast<WeakWatch*>(user); });
+        }, new WeakWatch(weak_from_this()));
+    }
+
+    void resumed() {
+        const auto now = monotonic_seconds();
+        for (auto& source : sources_) source.schedule.resumed(now);
         arm();
     }
 

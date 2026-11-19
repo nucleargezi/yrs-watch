@@ -1,6 +1,7 @@
 """Exercise the installed desktop protocols on an isolated bus and synthetic accounts."""
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -35,11 +36,13 @@ count = 0
 def on_call(conn, sender, path, iface_name, method, params, inv):
     global count
     if method == "Notify":
-        _, _, app_icon, summary, body, _, _, _ = params.unpack()
+        _, replaces, app_icon, summary, body, _, _, _ = params.unpack()
         count += 1
+        ident = replaces or count
         with log_path.open("a", encoding="utf-8") as out:
-            out.write(json.dumps({"icon": app_icon, "summary": summary, "body": body}, ensure_ascii=False) + "\n")
-        inv.return_value(GLib.Variant("(u)", (count,)))
+            out.write(json.dumps({"icon": app_icon, "summary": summary, "body": body, "id": ident,
+                                  "replaces": replaces}, ensure_ascii=False) + "\n")
+        inv.return_value(GLib.Variant("(u)", (ident,)))
 
 def on_bus(conn, name):
     reg = getattr(conn, "register_object_with_closures2", conn.register_object)
@@ -47,6 +50,31 @@ def on_bus(conn, name):
 
 Gio.bus_own_name(Gio.BusType.SESSION, "org.freedesktop.Notifications",
     Gio.BusNameOwnerFlags.NONE, on_bus, None, None)
+GLib.MainLoop().run()
+'''
+# Owns org.freedesktop.login1 on the private system bus; SIGUSR1 simulates a suspend and resume.
+LOGIN_MOCK = r'''import signal
+from gi.repository import Gio, GLib
+
+connection = None
+
+def acquired(conn, name):
+    global connection
+    connection = conn
+
+def cycle():
+    for sleeping in (True, False):
+        connection.emit_signal(None, "/org/freedesktop/login1", "org.freedesktop.login1.Manager",
+                               "PrepareForSleep", GLib.Variant("(b)", (sleeping,)))
+    return GLib.SOURCE_CONTINUE
+
+try:
+    from gi.repository import GLibUnix
+    add_signal = GLibUnix.signal_add
+except ImportError:
+    add_signal = GLib.unix_signal_add
+add_signal(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, cycle)
+Gio.bus_own_name(Gio.BusType.SYSTEM, "org.freedesktop.login1", Gio.BusNameOwnerFlags.NONE, None, acquired, None)
 GLib.MainLoop().run()
 '''
 MOCK = '''#!/usr/bin/python3
@@ -145,6 +173,13 @@ def run(binary, root):
         until(menu_ready)
         return p
 
+    # A private bus stands in for the system bus, so the test never talks to the real logind.
+    system_bus = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--print-address"],
+                                  stdout=subprocess.PIPE, text=True)
+    os.environ["DBUS_SYSTEM_BUS_ADDRESS"] = system_bus.stdout.readline().strip()
+    login_proc = subprocess.Popen([sys.executable, "-c", LOGIN_MOCK])
+    subprocess.run(["gdbus", "wait", "--system", "--timeout", "5", "org.freedesktop.login1"], check=True)
+
     notif_log = root / "notifications.jsonl"
     notif_proc = subprocess.Popen([sys.executable, "-c", NOTIFY_MOCK, str(notif_log)])
     subprocess.run(["gdbus", "wait", "--session", "--timeout", "5", "org.freedesktop.Notifications"], check=True)
@@ -190,6 +225,9 @@ def run(binary, root):
         notifs = read_notifs()
         assert notifs[2]["summary"] == "Antigravity" and notifs[2]["icon"] == "power-profile-performance-symbolic"
         assert "已恢复" in notifs[2]["body"]
+        # Alerts for one quota window replace each other instead of piling up.
+        assert notifs[1]["replaces"] == 0 and notifs[2]["replaces"] == notifs[1]["id"]
+        assert notifs[0]["id"] != notifs[1]["id"]
 
         # A failed query preserves the last successful measurement.
         (root / "codex").write_text("offline")
@@ -232,6 +270,12 @@ def run(binary, root):
         event(102)
         until(lambda: has("65%") and "刷新中" not in layout())
 
+        # Waking from suspend refreshes every source shortly afterwards.
+        counts = {name: len((root / (name + ".calls")).read_text().splitlines()) for name in ("codex", "agy")}
+        login_proc.send_signal(signal.SIGUSR1)
+        until(lambda: all(len((root / (name + ".calls")).read_text().splitlines()) > count
+                          for name, count in counts.items()) and "刷新中" not in layout(), duration=15)
+
         event(2)
         auto = root / "config" / "autostart" / (APP + ".desktop")
         auto_text = auto.read_text()
@@ -251,9 +295,10 @@ def run(binary, root):
         if p.poll() is None:
             p.terminate()
             p.wait(timeout=3)
-        if notif_proc.poll() is None:
-            notif_proc.terminate()
-            notif_proc.wait(timeout=3)
+        for proc in (notif_proc, login_proc, system_bus):
+            if proc.poll() is None:
+                proc.terminate()
+                proc.wait(timeout=3)
 
 
 if __name__ == "__main__":
@@ -265,5 +310,5 @@ if __name__ == "__main__":
             env = os.environ | {"XDG_CACHE_HOME": str(root / "cache"), "XDG_CONFIG_HOME": str(root / "config"),
                                 "XDG_DATA_HOME": str(root / "data"), "GSETTINGS_BACKEND": "memory"}
             subprocess.run(["dbus-run-session", "--", sys.executable, __file__,
-                            str(Path(sys.argv[1]).resolve()), temp], env=env, check=True, timeout=55)
+                            str(Path(sys.argv[1]).resolve()), temp], env=env, check=True, timeout=75)
         print("Desktop integration passed")

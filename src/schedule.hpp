@@ -18,6 +18,14 @@ struct Schedule {
         due = now + delay;
     }
 
+    // Monotonic time stops during suspend, so a pending deadline may be far too late
+    // after waking up. Check soon, leaving the network a few seconds to reconnect.
+    static constexpr std::int64_t resume_delay = 5;
+    void resumed(std::int64_t now) {
+        failures = 0;
+        due = std::min(due, now + resume_delay);
+    }
+
     std::optional<Epoch> next_reset(const ProviderState& state) const {
         std::optional<Epoch> earliest;
         if (failures || !state.last) return earliest;

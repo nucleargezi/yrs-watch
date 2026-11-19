@@ -4,6 +4,7 @@
 #include <gio/gio.h>
 
 #include <algorithm>
+#include <map>
 #include <string_view>
 #include <utility>
 
@@ -174,6 +175,7 @@ struct Tray::Impl : std::enable_shared_from_this<Impl> {
     Rows rows = make_rows(view, sections, page);
     guint revision = 1, item_id = 0, menu_id = 0, watch_id = 0, retry_id = 0;
     std::string watcher_owner;
+    std::map<std::string, guint32> notification_ids;
     bool registered = false, opened = false;
     GDBusConnection* bus = nullptr;
     GCancellable* cancellable = g_cancellable_new();
@@ -435,14 +437,27 @@ bool Tray::menu_open() const { return impl_->opened; }
 bool Tray::ready() const { return impl_->registered; }
 void Tray::update(TrayView view) { impl_->update(std::move(view)); }
 
-void Tray::notify(const std::string& title, const std::string& body, bool warning) {
+void Tray::notify(const std::string& title, const std::string& body, bool warning, const std::string& key) {
     if (!impl_->bus) return;
+    guint32 replaces = 0;
+    if (auto it = impl_->notification_ids.find(key); !key.empty() && it != impl_->notification_ids.end())
+        replaces = it->second;
     g_autofree gchar* escaped = g_markup_escape_text(body.c_str(), -1);
+    using Pending = std::pair<std::weak_ptr<Impl>, std::string>;
     g_dbus_connection_call(impl_->bus, "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
         "org.freedesktop.Notifications", "Notify",
-        g_variant_new("(susss@as@a{sv}i)", "Yrs Watch", 0u, warning ? warning_icon : normal_icon,
+        g_variant_new("(susss@as@a{sv}i)", "Yrs Watch", replaces, warning ? warning_icon : normal_icon,
                       title.c_str(), escaped, empty_array("s"), empty_array("{sv}"), -1),
-        G_VARIANT_TYPE("(u)"), G_DBUS_CALL_FLAGS_NONE, 5000, impl_->cancellable, nullptr, nullptr);
+        G_VARIANT_TYPE("(u)"), G_DBUS_CALL_FLAGS_NONE, 5000, impl_->cancellable,
+        [](GObject* source, GAsyncResult* res, gpointer data) {
+            std::unique_ptr<Pending> pending(static_cast<Pending*>(data));
+            g_autoptr(GVariant) reply = g_dbus_connection_call_finish(G_DBUS_CONNECTION(source), res, nullptr);
+            auto self = pending->first.lock();
+            if (!self || !reply || pending->second.empty()) return;
+            guint32 id = 0;
+            g_variant_get(reply, "(u)", &id);
+            if (id) self->notification_ids[pending->second] = id;
+        }, new Pending(impl_, key));
 }
 
 } // namespace yrswatch

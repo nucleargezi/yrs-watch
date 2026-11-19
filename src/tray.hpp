@@ -41,7 +41,9 @@ public:
     Tray(const Tray&) = delete;
     Tray& operator=(const Tray&) = delete;
     void update(TrayView view);
-    void notify(const std::string& title, const std::string& body, bool warning = false);
+    // Notifications sharing a non-empty key replace each other on screen.
+    void notify(const std::string& title, const std::string& body, bool warning = false,
+                const std::string& key = {});
     bool menu_open() const;
     bool ready() const;
 
