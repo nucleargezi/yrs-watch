@@ -156,6 +156,8 @@ def run(binary, root):
         (cli / name).chmod(0o755)
     os.environ["PATH"] = str(cli) + os.pathsep + os.environ["PATH"]
     os.environ["MOCK_STATE"] = str(root)
+    version = subprocess.run([binary, "--version"], capture_output=True, text=True, check=True, timeout=3)
+    assert version.stdout.startswith("yrs-watch ") and version.stdout.strip() != "yrs-watch", version
 
     def start():
         p = subprocess.Popen([binary], stderr=subprocess.PIPE, text=True)

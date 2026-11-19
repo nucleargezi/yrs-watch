@@ -3,6 +3,7 @@
 #include "providers.hpp"
 #include "schedule.hpp"
 #include "tray.hpp"
+#include "version.hpp"
 
 #include <gio/gio.h>
 #include <glib-unix.h>
@@ -444,6 +445,13 @@ int main(int argc, char** argv) {
     using namespace yrswatch;
     g_set_application_name("yrs-watch");
     auto* app = g_application_new(app_id, G_APPLICATION_DEFAULT_FLAGS);
+    g_application_add_main_option(app, "version", 0, G_OPTION_FLAG_NONE, G_OPTION_ARG_NONE,
+                                  "Print the version and exit", nullptr);
+    g_signal_connect(app, "handle-local-options", G_CALLBACK(+[](GApplication*, GVariantDict* options, gpointer) -> gint {
+        if (!g_variant_dict_contains(options, "version")) return -1;
+        std::printf("yrs-watch %s\n", version);
+        return 0;
+    }), nullptr);
     Session session;
     g_signal_connect(app, "activate", G_CALLBACK(+[](GApplication* application, gpointer data) {
         auto& state = *static_cast<Session*>(data);

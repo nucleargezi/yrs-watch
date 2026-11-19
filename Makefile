@@ -4,11 +4,11 @@ WATCH_CPPFLAGS ?= $(shell pkg-config --cflags gio-2.0 json-glib-1.0)
 WATCH_LIBS ?= $(shell pkg-config --libs gio-2.0 json-glib-1.0)
 FONT_CPPFLAGS ?= $(shell pkg-config --cflags pangocairo)
 FONT_LIBS ?= $(shell pkg-config --libs pangocairo)
-CPPFLAGS += -Isrc $(WATCH_CPPFLAGS)
+override CPPFLAGS += -Isrc $(WATCH_CPPFLAGS)
 CXXFLAGS ?= -O2
 WARNINGS := -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wno-sign-conversion
-CXXFLAGS += -std=c++20 $(WARNINGS) -pthread
-LDLIBS += $(WATCH_LIBS) -pthread
+override CXXFLAGS += -std=c++20 $(WARNINGS) -pthread
+override LDLIBS += $(WATCH_LIBS) -pthread
 provider_sources := providers child_process json_util provider_codex provider_antigravity provider_claude
 sources := main core desktop tray quota_layout $(provider_sources)
 provider_objects := $(addprefix build/,$(addsuffix .o,$(provider_sources)))

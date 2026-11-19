@@ -208,6 +208,11 @@ struct QuotaLayout::Font : std::enable_shared_from_this<Font> {
 
     int stops(const std::string& text) const { return cache.at(text).stops; }
     const std::string& caption(const std::string& text) const { return cache.at(text).caption; }
+    // Columns rely on an implicit contract with GNOME Shell's AppIndicator
+    // extension: it renders menu labels with Pango, which expands each TAB to
+    // the next default tab stop. The helper measures those stops with the
+    // desktop font and scale. Until it answers, or if it fails, format() falls
+    // back to single TABs, which stay readable but may not line up.
     std::string cell(const std::string& text, int width) const {
         return text + gutter + std::string(std::max(1, width - stops(text) + 1), '\t');
     }

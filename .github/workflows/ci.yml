@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++ make pkg-config \
+            libglib2.0-dev libjson-glib-dev libpango1.0-dev \
+            python3-gi gir1.2-glib-2.0 dbus dbus-bin fonts-dejavu-core
+      - name: Build
+        run: make -j
+      - name: Test
+        run: make test
+      - name: Test with sanitizers
+        run: make -j test-asan
+      - name: Test with NDEBUG
+        run: |
+          make clean
+          make test CXXFLAGS="-O2 -DNDEBUG"
